@@ -1,76 +1,93 @@
-import { NextResponse } from "next/server";
-// load pdf-parse dynamically inside the handler to avoid module-eval side-effects
-import OpenAI from 'openai'
 
-export const runtime = 'nodejs';
+import OpenAI from "openai";
+import fs from "fs";
+import pdfParse from 'pdf-parse';
 
-async function callOpenAI(prompt) {
-  const token = process.env.GITHUB_TOKEN || process.env.OPENAI_API_KEY
-  if (!token) throw new Error('GITHUB_TOKEN or OPENAI_API_KEY not set')
+// To authenticate with the model you will need to generate a personal access token (PAT) in your GitHub settings. 
+// Create your PAT token by following instructions here: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens
+const token = process.env["GITHUB_TOKEN"];
 
-  const client = new OpenAI({ apiKey: token, baseURL: 'https://models.github.ai/inference' })
+export async function POST(req) {
+  try {
+    const formData = await req.formData();
+    const company = formData.get("company");
+    const title = formData.get("title");
+    const description = formData.get("description");
+    const resumeFile = formData.get("resume");
 
-  const model = process.env.OPENAI_MODEL || 'openai/gpt-4o'
-  const resp = await client.chat.completions.create({
-    model,
+    if (!company || !title || !description || !resumeFile) {
+      return new Response(JSON.stringify({ error: "Missing required fields" }), { status: 400 });
+    }
+
+    let resumeContent = '';
+    try {
+      if (resumeFile.type === 'application/pdf') {
+        const arrayBuffer = await resumeFile.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const data = await pdfParse(buffer);
+        resumeContent = data.text || '';
+      } else {
+        resumeContent = await resumeFile.text();
+      }
+    } catch (err) {
+      console.error('Error parsing resume file:', err);
+      resumeContent = '';
+    }
+
+    // Here you would typically call your AI model to analyze the resume against the job description
+    // For demonstration, we'll return a mock response
+ 
+     const client = new OpenAI({
+    baseURL: "https://models.github.ai/inference",
+    apiKey: token
+  });
+
+      const prompt = `You are a professional resume reviewer. Analyze the following resume and provide: 
+         - Skills
+         - Work experience
+         - Education
+         - Suggestions for improvement
+
+         Resume content:
+         ${resumeContent}`;
+
+  const response = await client.chat.completions.create({
+
+
+
     messages: [
-      { role: 'system', content: 'You are an expert resume reviewer and ATS specialist. Return a JSON object with numeric "score" (0-100) and array "tips" (3 short suggestions).' },
-      { role: 'user', content: prompt }
+      { role:"system", content: "You are a professional resume reviewer." },
+      { role:"user", content: prompt }
     ],
+    model: "openai/gpt-4o",
     temperature: 1,
-    max_tokens: 800
-  })
+    max_tokens: 4096,
+    top_p: 1
+  });
 
-  const assistant = resp?.choices?.[0]?.message?.content || ''
-  try {
-    return JSON.parse(assistant)
-  } catch (e) {
-    return { raw: assistant }
+  console.log(response.choices[0].message.content);
+
+    const analysisResult = {
+      company,
+      title,
+      description,
+      resumeContent,
+      score: Math.floor(Math.random() * 100), // Mock score
+      feedback: response.choices[0].message.content // Use the AI response as feedback"
+    };
+
+    return new Response(JSON.stringify(analysisResult), { status: 200 });
+  } catch (error) {
+    console.error("Error processing the request:", error);
+    return new Response(JSON.stringify({ error: "Internal Server Error" }), { status: 500 });
   }
 }
 
-export async function POST(request) {
-  try {
-    const form = await request.formData();
-    const file = form.get('resume'); // File object
-    const company = form.get('company') || '';
-    const title = form.get('title') || '';
-    const description = form.get('description') || '';
+export async function main() {
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
-    }
-
-    // extract text from PDF (dynamic import to avoid package side-effects at module load)
-    const buffer = Buffer.from(await file.arrayBuffer())
-    let text = ''
-    try {
-      const { default: pdf } = await import('pdf-parse')
-      const data = await pdf(buffer)
-      text = data.text || ''
-    } catch (err) {
-      console.error('PDF parse error', err)
-    }
-
-    const prompt = `Company: ${company}\nJob title: ${title}\nJob description: ${description}\n\nResume text:\n${text.slice(0, 30000)}`
-
-    let analysis = { score: 85, tips: ['Use more action verbs', 'Quantify achievements'] }
-    try {
-      const ai = await callOpenAI(prompt)
-      analysis = { score: ai.score ?? analysis.score, tips: ai.tips ?? analysis.tips }
-    } catch (err) {
-      console.error('OpenAI error', err)
-    }
-
-    return NextResponse.json({
-      message: 'Resume analyzed',
-      filename: file.name,
-      size: file.size,
-      score: analysis.score,
-      tips: analysis.tips
-    })
-  } catch (err) {
-    console.error('Route handler error', err)
-    return NextResponse.json({ error: err?.message || 'Internal Server Error' }, { status: 500 })
-  }
+  
 }
+
+main().catch((err) => {
+  console.error("The sample encountered an error:", err);
+});

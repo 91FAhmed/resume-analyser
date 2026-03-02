@@ -118,9 +118,9 @@ const page = () => {
               <div>
                 <h3 className="font-semibold">Improvement Tips</h3>
                 <ul className="list-disc list-inside text-sm mt-2">
-                  {(result.tips || []).map((t, i) => (
-                    <li key={i}>{t}</li>
-                  ))}
+                  {result.feedback ? result.feedback.split('\n').map((tip, idx) => (
+                    <li key={idx}>{tip}</li>
+                  )) : <li>No feedback available.</li>}
                 </ul>
               </div>
             </div>
